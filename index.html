@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Запчасть</title>
+  <style>
+    :root {
+      --bg: #1a1f1c;
+      --surface: #2c3430;
+      --mist: #c5d0ca;
+      --muted: #8a968f;
+      --emerald: #2dd4a8;
+      --graphite: #152018;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background:
+        radial-gradient(ellipse at 20% 0%, #243028 0%, transparent 50%),
+        linear-gradient(160deg, var(--bg), var(--graphite));
+      color: var(--mist);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      width: 100%;
+      max-width: 360px;
+      background: color-mix(in srgb, var(--surface) 92%, transparent);
+      border: 1px solid color-mix(in srgb, var(--mist) 10%, transparent);
+      border-radius: 16px;
+      padding: 28px 22px;
+      text-align: center;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+    .article {
+      margin: 0 0 28px;
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      word-break: break-all;
+      color: var(--mist);
+    }
+    .article.empty { color: var(--muted); font-size: 1.1rem; font-weight: 500; }
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    a.btn {
+      display: block;
+      text-decoration: none;
+      padding: 16px 18px;
+      border-radius: 12px;
+      font-size: 1.05rem;
+      font-weight: 700;
+      transition: transform 0.12s ease, opacity 0.12s ease;
+    }
+    a.btn:active { transform: scale(0.98); }
+    a.btn.primary {
+      background: var(--emerald);
+      color: var(--bg);
+    }
+    a.btn.secondary {
+      background: transparent;
+      color: var(--mist);
+      border: 1px solid color-mix(in srgb, var(--mist) 28%, transparent);
+    }
+    a.btn[aria-disabled="true"] {
+      opacity: 0.4;
+      pointer-events: none;
+    }
+    .hint {
+      margin-top: 18px;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Артикул</h1>
+    <p id="article" class="article empty">не указан</p>
+    <div class="actions">
+      <a id="btn-bamper" class="btn primary" href="#" aria-disabled="true">Смотреть на bamper.by</a>
+      <a id="btn-avby" class="btn secondary" href="#" aria-disabled="true">Смотреть на av.by</a>
+    </div>
+    <p class="hint">Выберите сайт, чтобы открыть поиск по этой запчасти</p>
+  </main>
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var article = (params.get("a") || params.get("article") || "").trim();
+      var el = document.getElementById("article");
+      var bamper = document.getElementById("btn-bamper");
+      var avby = document.getElementById("btn-avby");
+
+      if (!article) {
+        el.textContent = "не указан";
+        el.classList.add("empty");
+        return;
+      }
+
+      el.textContent = article;
+      el.classList.remove("empty");
+
+      var encoded = encodeURIComponent(article);
+      bamper.href = "https://bamper.by/zchbu/artikul_" + article + "/";
+      avby.href =
+        "https://parts.av.by/filter?category_type=1&vendor_code=" +
+        encoded +
+        "&price_currency=1";
+      bamper.removeAttribute("aria-disabled");
+      avby.removeAttribute("aria-disabled");
+    })();
+  </script>
+</body>
+</html>
