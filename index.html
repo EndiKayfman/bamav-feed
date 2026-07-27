@@ -12,6 +12,7 @@
       --muted: #8a968f;
       --emerald: #2dd4a8;
       --graphite: #152018;
+      --danger: #f87171;
     }
     * { box-sizing: border-box; }
     body {
@@ -53,6 +54,30 @@
       color: var(--mist);
     }
     .article.empty { color: var(--muted); font-size: 1.1rem; font-weight: 500; }
+    .status {
+      margin: 0 0 18px;
+      padding: 14px 16px;
+      border-radius: 12px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      line-height: 1.45;
+    }
+    .status.hidden { display: none; }
+    .status.loading {
+      color: var(--muted);
+      background: color-mix(in srgb, var(--mist) 6%, transparent);
+      border: 1px solid color-mix(in srgb, var(--mist) 12%, transparent);
+    }
+    .status.not-found {
+      color: var(--danger);
+      background: color-mix(in srgb, var(--danger) 10%, transparent);
+      border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+    }
+    .status.error {
+      color: var(--muted);
+      background: color-mix(in srgb, var(--mist) 6%, transparent);
+      border: 1px solid color-mix(in srgb, var(--mist) 12%, transparent);
+    }
     .loc {
       margin: 0 0 18px;
       padding: 14px 16px;
@@ -94,6 +119,7 @@
       flex-direction: column;
       gap: 12px;
     }
+    .actions.hidden { display: none; }
     a.btn {
       display: block;
       text-decoration: none;
@@ -113,34 +139,69 @@
       color: var(--mist);
       border: 1px solid color-mix(in srgb, var(--mist) 28%, transparent);
     }
-    a.btn[aria-disabled="true"] {
-      opacity: 0.4;
-      pointer-events: none;
-    }
     .hint {
       margin-top: 18px;
       font-size: 0.8rem;
       color: var(--muted);
       line-height: 1.4;
     }
+    .hint.hidden { display: none; }
   </style>
 </head>
 <body>
   <main class="card">
     <p class="label">Артикул</p>
     <p id="article" class="article empty">не указан</p>
+    <p id="status" class="status hidden"></p>
     <div id="loc" class="loc hidden"></div>
     <div id="photo-wrap" class="photo-wrap hidden">
       <img id="photo" alt="Фото запчасти" />
     </div>
-    <div class="actions">
-      <a id="btn-bamper" class="btn primary" href="#" aria-disabled="true">Смотреть на bamper.by</a>
-      <a id="btn-avby" class="btn secondary" href="#" aria-disabled="true">Смотреть на av.by</a>
+    <div id="actions" class="actions hidden">
+      <a id="btn-bamper" class="btn primary" href="#">Смотреть на bamper.by</a>
+      <a id="btn-avby" class="btn secondary" href="#">Смотреть на av.by</a>
     </div>
-    <p class="hint">Выберите сайт, чтобы открыть поиск по этой запчасти</p>
+    <p id="hint" class="hint hidden">Выберите сайт, чтобы открыть поиск по этой запчасти</p>
   </main>
   <script>
     (function () {
+      var BAMPER_CSV = "bamper.csv";
+      var AVBY_CSV = "avby.csv";
+
+      function norm(value) {
+        return String(value || "").trim().toUpperCase();
+      }
+
+      function parseCsvLine(line) {
+        var cols = [];
+        var cur = "";
+        var inQuotes = false;
+        for (var i = 0; i < line.length; i++) {
+          var ch = line[i];
+          if (inQuotes) {
+            if (ch === '"') {
+              if (line[i + 1] === '"') {
+                cur += '"';
+                i++;
+              } else {
+                inQuotes = false;
+              }
+            } else {
+              cur += ch;
+            }
+          } else if (ch === '"') {
+            inQuotes = true;
+          } else if (ch === ";") {
+            cols.push(cur);
+            cur = "";
+          } else {
+            cur += ch;
+          }
+        }
+        cols.push(cur);
+        return cols;
+      }
+
       function decodeLocLines(code) {
         if (!code) return [];
         var raw = code.trim();
@@ -149,7 +210,6 @@
         if (cOnly === "K2") return ["Контейнер К2"];
 
         var parts = raw.split(".");
-        // Склад: 1.2.3.4
         if (parts.length === 4) {
           return [
             "Склад " + parts[0],
@@ -158,7 +218,6 @@
             "Полка " + parts[3],
           ];
         }
-        // Старый формат 1.K1.2.3.4
         if (parts.length === 5) {
           var mid = String(parts[1] || "").toUpperCase().replace(/К/g, "K");
           if (mid === "K1") return ["Контейнер К1"];
@@ -173,8 +232,31 @@
         return [code];
       }
 
-      function renderLoc(el, code) {
-        var lines = decodeLocLines(code);
+      function warehouseLabelToLines(label) {
+        if (!label) return [];
+        var text = label.trim();
+        var cOnly = text.toUpperCase().replace(/К/g, "K");
+        if (cOnly === "K1") return ["Контейнер К1"];
+        if (cOnly === "K2") return ["Контейнер К2"];
+
+        var match = text.match(
+          /Склад\s*(\d+).*?Ст\.?\s*(\d+).*?Сек\.?\s*(\d+).*?Пол\.?\s*(\d+)/i
+        );
+        if (match) {
+          return [
+            "Склад " + match[1],
+            "Стеллаж " + match[2],
+            "Секция " + match[3],
+            "Полка " + match[4],
+          ];
+        }
+
+        if (/контейнер/i.test(text)) return [text];
+        if (/^K[12]$/i.test(cOnly)) return ["Контейнер " + text.replace(/K/i, "К")];
+        return [text];
+      }
+
+      function renderLoc(el, lines) {
         if (!lines.length) return;
         el.innerHTML = lines
           .map(function (line) {
@@ -184,17 +266,155 @@
         el.classList.remove("hidden");
       }
 
+      function firstPhotoUrl(raw) {
+        if (!raw) return "";
+        var parts = String(raw).split(",");
+        for (var i = 0; i < parts.length; i++) {
+          var url = parts[i].trim();
+          if (/^https?:\/\//i.test(url)) return url;
+        }
+        return "";
+      }
+
+      function findInCsv(text, articleNorm, idColumns) {
+        var lines = text.split(/\r?\n/).filter(function (line) {
+          return line.trim().length > 0;
+        });
+        if (lines.length < 2) return null;
+
+        var header = parseCsvLine(lines[0]);
+        var indexes = idColumns
+          .map(function (name) {
+            return header.indexOf(name);
+          })
+          .filter(function (idx) {
+            return idx >= 0;
+          });
+        if (!indexes.length) return null;
+
+        for (var i = 1; i < lines.length; i++) {
+          var row = parseCsvLine(lines[i]);
+          for (var j = 0; j < indexes.length; j++) {
+            if (norm(row[indexes[j]]) === articleNorm) {
+              return row;
+            }
+          }
+        }
+        return null;
+      }
+
+      function findPart(articleNorm, bamperText, avbyText) {
+        var bamperHeader = parseCsvLine(bamperText.split(/\r?\n/)[0] || "");
+        var bamperRow = findInCsv(bamperText, articleNorm, [
+          "ID_EXT",
+          "ОРИГИНАЛЬНЫЙ НОМЕР",
+        ]);
+        if (bamperRow) {
+          return {
+            warehouse:
+              bamperRow[bamperHeader.indexOf("СКЛАДСКАЯ ИНФОРМАЦИЯ")] || "",
+            photo: bamperRow[bamperHeader.indexOf("ФОТО")] || "",
+          };
+        }
+
+        var avbyHeader = parseCsvLine(avbyText.split(/\r?\n/)[0] || "");
+        var avbyRow = findInCsv(avbyText, articleNorm, ["ID", "OEM"]);
+        if (avbyRow) {
+          return {
+            warehouse: "",
+            photo: avbyRow[avbyHeader.indexOf("PHOTO")] || "",
+          };
+        }
+
+        return null;
+      }
+
+      function setStatus(el, kind, message) {
+        el.textContent = message;
+        el.className = "status " + kind;
+      }
+
+      function showPhoto(wrap, img, url) {
+        if (!/^https?:\/\//i.test(url)) return;
+        img.src = url;
+        img.onerror = function () {
+          wrap.classList.add("hidden");
+        };
+        wrap.classList.remove("hidden");
+      }
+
+      function showFoundUI(part, article, locCode, photoParam) {
+        var locEl = document.getElementById("loc");
+        var photoWrap = document.getElementById("photo-wrap");
+        var photoEl = document.getElementById("photo");
+        var actions = document.getElementById("actions");
+        var hint = document.getElementById("hint");
+        var bamper = document.getElementById("btn-bamper");
+        var avby = document.getElementById("btn-avby");
+
+        var locLines = locCode
+          ? decodeLocLines(locCode)
+          : warehouseLabelToLines(part.warehouse);
+        renderLoc(locEl, locLines);
+
+        var photo = photoParam || firstPhotoUrl(part.photo);
+        showPhoto(photoWrap, photoEl, photo);
+
+        var encoded = encodeURIComponent(article);
+        bamper.href = "https://bamper.by/zchbu/artikul_" + article + "/";
+        avby.href =
+          "https://parts.av.by/filter?category_type=1&vendor_code=" +
+          encoded +
+          "&price_currency=1";
+
+        actions.classList.remove("hidden");
+        hint.classList.remove("hidden");
+      }
+
+      async function verifyAndRender(article, locCode, photoParam) {
+        var statusEl = document.getElementById("status");
+        setStatus(statusEl, "loading", "Проверяем склад…");
+
+        try {
+          var responses = await Promise.all([
+            fetch(BAMPER_CSV, { cache: "no-store" }),
+            fetch(AVBY_CSV, { cache: "no-store" }),
+          ]);
+          if (!responses[0].ok || !responses[1].ok) {
+            throw new Error("csv fetch failed");
+          }
+
+          var texts = await Promise.all(responses.map(function (r) {
+            return r.text();
+          }));
+          var part = findPart(norm(article), texts[0], texts[1]);
+
+          if (!part) {
+            setStatus(
+              statusEl,
+              "not-found",
+              "Такой запчасти нет на складе"
+            );
+            return;
+          }
+
+          statusEl.classList.add("hidden");
+          showFoundUI(part, article, locCode, photoParam);
+        } catch (err) {
+          setStatus(
+            statusEl,
+            "error",
+            "Не удалось проверить склад. Проверьте подключение к интернету."
+          );
+        }
+      }
+
       var params = new URLSearchParams(window.location.search);
       var article = (params.get("a") || params.get("article") || "").trim();
       var locCode = (params.get("loc") || params.get("location") || "").trim();
       var photo = (params.get("p") || params.get("photo") || "").trim();
 
       var el = document.getElementById("article");
-      var locEl = document.getElementById("loc");
-      var photoWrap = document.getElementById("photo-wrap");
-      var photoEl = document.getElementById("photo");
-      var bamper = document.getElementById("btn-bamper");
-      var avby = document.getElementById("btn-avby");
 
       if (!article) {
         el.textContent = "не указан";
@@ -204,27 +424,7 @@
 
       el.textContent = article;
       el.classList.remove("empty");
-
-      if (locCode) {
-        renderLoc(locEl, locCode);
-      }
-
-      if (/^https?:\/\//i.test(photo)) {
-        photoEl.src = photo;
-        photoEl.onerror = function () {
-          photoWrap.classList.add("hidden");
-        };
-        photoWrap.classList.remove("hidden");
-      }
-
-      var encoded = encodeURIComponent(article);
-      bamper.href = "https://bamper.by/zchbu/artikul_" + article + "/";
-      avby.href =
-        "https://parts.av.by/filter?category_type=1&vendor_code=" +
-        encoded +
-        "&price_currency=1";
-      bamper.removeAttribute("aria-disabled");
-      avby.removeAttribute("aria-disabled");
+      verifyAndRender(article, locCode, photo);
     })();
   </script>
 </body>
