@@ -165,8 +165,10 @@
   </main>
   <script>
     (function () {
+      var PARTS_INDEX = "parts.json";
       var BAMPER_CSV = "bamper.csv";
       var AVBY_CSV = "avby.csv";
+      var CACHE_KEY = "bamav-parts-v1";
 
       function norm(value) {
         return String(value || "").trim().toUpperCase();
@@ -266,6 +268,34 @@
         el.classList.remove("hidden");
       }
 
+      function readCache() {
+        try {
+          var raw = localStorage.getItem(CACHE_KEY);
+          if (!raw) return null;
+          var data = JSON.parse(raw);
+          if (!data || !data.parts) return null;
+          return data;
+        } catch (e) {
+          return null;
+        }
+      }
+
+      function writeCache(data) {
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+        } catch (e) {}
+      }
+
+      function lookupPart(index, articleNorm) {
+        if (!index || !index.parts) return null;
+        var hit = index.parts[articleNorm];
+        if (!hit) return null;
+        return {
+          warehouse: hit.w || "",
+          photo: hit.p || "",
+        };
+      }
+
       function firstPhotoUrl(raw) {
         if (!raw) return "";
         var parts = String(raw).split(",");
@@ -276,57 +306,91 @@
         return "";
       }
 
-      function findInCsv(text, articleNorm, idColumns) {
-        var lines = text.split(/\r?\n/).filter(function (line) {
+      async function fetchPartsIndex() {
+        var resp = await fetch(PARTS_INDEX);
+        if (!resp.ok) return null;
+        var data = await resp.json();
+        if (!data || !data.parts) return null;
+        writeCache(data);
+        return data;
+      }
+
+      async function fetchIndexFromCsv() {
+        var responses = await Promise.all([
+          fetch(BAMPER_CSV),
+          fetch(AVBY_CSV),
+        ]);
+        if (!responses[0].ok || !responses[1].ok) {
+          throw new Error("csv fetch failed");
+        }
+        var texts = await Promise.all(responses.map(function (r) {
+          return r.text();
+        }));
+
+        var parts = {};
+        var lines = texts[0].split(/\r?\n/).filter(function (line) {
           return line.trim().length > 0;
         });
-        if (lines.length < 2) return null;
-
-        var header = parseCsvLine(lines[0]);
-        var indexes = idColumns
-          .map(function (name) {
-            return header.indexOf(name);
-          })
-          .filter(function (idx) {
-            return idx >= 0;
-          });
-        if (!indexes.length) return null;
-
-        for (var i = 1; i < lines.length; i++) {
-          var row = parseCsvLine(lines[i]);
-          for (var j = 0; j < indexes.length; j++) {
-            if (norm(row[indexes[j]]) === articleNorm) {
-              return row;
+        if (lines.length >= 2) {
+          var header = parseCsvLine(lines[0]);
+          var idIdx = header.indexOf("ID_EXT");
+          var oemIdx = header.indexOf("ОРИГИНАЛЬНЫЙ НОМЕР");
+          var whIdx = header.indexOf("СКЛАДСКАЯ ИНФОРМАЦИЯ");
+          var photoIdx = header.indexOf("ФОТО");
+          for (var i = 1; i < lines.length; i++) {
+            var row = parseCsvLine(lines[i]);
+            var entry = {
+              w: whIdx >= 0 ? row[whIdx] || "" : "",
+              p: photoIdx >= 0 ? row[photoIdx] || "" : "",
+            };
+            if (idIdx >= 0) {
+              var idKey = norm(row[idIdx]);
+              if (idKey) parts[idKey] = entry;
+            }
+            if (oemIdx >= 0) {
+              var oemKey = norm(row[oemIdx]);
+              if (oemKey && !parts[oemKey]) parts[oemKey] = entry;
             }
           }
         }
-        return null;
+
+        var avbyLines = texts[1].split(/\r?\n/).filter(function (line) {
+          return line.trim().length > 0;
+        });
+        if (avbyLines.length >= 2) {
+          var avbyHeader = parseCsvLine(avbyLines[0]);
+          var avbyIdIdx = avbyHeader.indexOf("ID");
+          var avbyOemIdx = avbyHeader.indexOf("OEM");
+          var avbyPhotoIdx = avbyHeader.indexOf("PHOTO");
+          for (var j = 1; j < avbyLines.length; j++) {
+            var avbyRow = parseCsvLine(avbyLines[j]);
+            var avbyEntry = {
+              w: "",
+              p: avbyPhotoIdx >= 0 ? avbyRow[avbyPhotoIdx] || "" : "",
+            };
+            if (avbyIdIdx >= 0) {
+              var avbyIdKey = norm(avbyRow[avbyIdIdx]);
+              if (avbyIdKey && !parts[avbyIdKey]) parts[avbyIdKey] = avbyEntry;
+            }
+            if (avbyOemIdx >= 0) {
+              var avbyOemKey = norm(avbyRow[avbyOemIdx]);
+              if (avbyOemKey && !parts[avbyOemKey]) parts[avbyOemKey] = avbyEntry;
+            }
+          }
+        }
+
+        var index = { updated: new Date().toISOString(), parts: parts };
+        writeCache(index);
+        return index;
       }
 
-      function findPart(articleNorm, bamperText, avbyText) {
-        var bamperHeader = parseCsvLine(bamperText.split(/\r?\n/)[0] || "");
-        var bamperRow = findInCsv(bamperText, articleNorm, [
-          "ID_EXT",
-          "ОРИГИНАЛЬНЫЙ НОМЕР",
-        ]);
-        if (bamperRow) {
-          return {
-            warehouse:
-              bamperRow[bamperHeader.indexOf("СКЛАДСКАЯ ИНФОРМАЦИЯ")] || "",
-            photo: bamperRow[bamperHeader.indexOf("ФОТО")] || "",
-          };
-        }
+      async function loadIndex() {
+        try {
+          var index = await fetchPartsIndex();
+          if (index) return index;
+        } catch (e) {}
 
-        var avbyHeader = parseCsvLine(avbyText.split(/\r?\n/)[0] || "");
-        var avbyRow = findInCsv(avbyText, articleNorm, ["ID", "OEM"]);
-        if (avbyRow) {
-          return {
-            warehouse: "",
-            photo: avbyRow[avbyHeader.indexOf("PHOTO")] || "",
-          };
-        }
-
-        return null;
+        return fetchIndexFromCsv();
       }
 
       function setStatus(el, kind, message) {
@@ -344,6 +408,7 @@
       }
 
       function showFoundUI(part, article, locCode, photoParam) {
+        var statusEl = document.getElementById("status");
         var locEl = document.getElementById("loc");
         var photoWrap = document.getElementById("photo-wrap");
         var photoEl = document.getElementById("photo");
@@ -351,6 +416,8 @@
         var hint = document.getElementById("hint");
         var bamper = document.getElementById("btn-bamper");
         var avby = document.getElementById("btn-avby");
+
+        statusEl.classList.add("hidden");
 
         var locLines = locCode
           ? decodeLocLines(locCode)
@@ -371,35 +438,47 @@
         hint.classList.remove("hidden");
       }
 
+      function showNotFound(statusEl) {
+        setStatus(statusEl, "not-found", "Такой запчасти нет на складе");
+      }
+
+      function applyLookup(index, article, locCode, photoParam, statusEl) {
+        var part = lookupPart(index, norm(article));
+        if (part) {
+          showFoundUI(part, article, locCode, photoParam);
+          return true;
+        }
+        showNotFound(statusEl);
+        return false;
+      }
+
       async function verifyAndRender(article, locCode, photoParam) {
         var statusEl = document.getElementById("status");
+        var articleNorm = norm(article);
+        var cached = readCache();
+        var cachedHit = cached ? lookupPart(cached, articleNorm) : null;
+
+        if (cachedHit) {
+          showFoundUI(cachedHit, article, locCode, photoParam);
+          fetchPartsIndex()
+            .then(function (fresh) {
+              if (!fresh) return;
+              var freshHit = lookupPart(fresh, articleNorm);
+              if (freshHit) {
+                showFoundUI(freshHit, article, locCode, photoParam);
+              } else {
+                showNotFound(statusEl);
+              }
+            })
+            .catch(function () {});
+          return;
+        }
+
         setStatus(statusEl, "loading", "Проверяем склад…");
 
         try {
-          var responses = await Promise.all([
-            fetch(BAMPER_CSV, { cache: "no-store" }),
-            fetch(AVBY_CSV, { cache: "no-store" }),
-          ]);
-          if (!responses[0].ok || !responses[1].ok) {
-            throw new Error("csv fetch failed");
-          }
-
-          var texts = await Promise.all(responses.map(function (r) {
-            return r.text();
-          }));
-          var part = findPart(norm(article), texts[0], texts[1]);
-
-          if (!part) {
-            setStatus(
-              statusEl,
-              "not-found",
-              "Такой запчасти нет на складе"
-            );
-            return;
-          }
-
-          statusEl.classList.add("hidden");
-          showFoundUI(part, article, locCode, photoParam);
+          var index = await loadIndex();
+          applyLookup(index, article, locCode, photoParam, statusEl);
         } catch (err) {
           setStatus(
             statusEl,
