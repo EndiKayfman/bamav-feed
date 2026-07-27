@@ -1,4 +1,4 @@
-name: Sync parts index
+name: Sync feeds and parts index
 
 on:
   push:
@@ -6,7 +6,8 @@ on:
     paths:
       - bamper.csv
       - avby.csv
-      - scripts/build_parts_index.py
+      - inbox/**
+      - scripts/**
 
 permissions:
   contents: write
@@ -21,17 +22,22 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Merge inbox into avby.csv
+        run: python scripts/merge_inbox.py
+
       - name: Build parts.json
         run: python scripts/build_parts_index.py
 
-      - name: Commit parts.json
+      - name: Commit feed updates
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add parts.json
+          git add avby.csv parts.json inbox || true
+          # inbox deletions
+          git add -u inbox || true
           if git diff --cached --quiet; then
-            echo "parts.json already up to date"
+            echo "Nothing to commit"
             exit 0
           fi
-          git commit -m "Auto-update parts.json from CSV feeds"
+          git commit -m "Merge inbox into avby.csv and refresh parts.json"
           git push
