@@ -237,25 +237,51 @@
       function warehouseLabelToLines(label) {
         if (!label) return [];
         var text = label.trim();
-        var cOnly = text.toUpperCase().replace(/К/g, "K");
-        if (cOnly === "K1") return ["Контейнер К1"];
-        if (cOnly === "K2") return ["Контейнер К2"];
-
-        var match = text.match(
-          /Склад\s*(\d+).*?Ст\.?\s*(\d+).*?Сек\.?\s*(\d+).*?Пол\.?\s*(\d+)/i
-        );
-        if (match) {
-          return [
-            "Склад " + match[1],
-            "Стеллаж " + match[2],
-            "Секция " + match[3],
-            "Полка " + match[4],
-          ];
+        var boxMatch = text.match(/(?:^|\s·\s*)Ящик:\s*(.+)$/i);
+        var boxLine = boxMatch ? boxMatch[1].trim() : "";
+        if (boxMatch) {
+          text = text.slice(0, boxMatch.index).replace(/\s·\s*$/, "").trim();
         }
 
-        if (/контейнер/i.test(text)) return [text];
-        if (/^K[12]$/i.test(cOnly)) return ["Контейнер " + text.replace(/K/i, "К")];
-        return [text];
+        var cOnly = text.toUpperCase().replace(/К/g, "K");
+        var lines = [];
+        if (cOnly === "K1") lines = ["Контейнер К1"];
+        else if (cOnly === "K2") lines = ["Контейнер К2"];
+        else {
+          var match = text.match(
+            /Склад\s*(\d+).*?Ст\.?\s*(\d+).*?Сек\.?\s*(\d+).*?Пол\.?\s*(\d+)/i
+          );
+          if (match) {
+            lines = [
+              "Склад " + match[1],
+              "Стеллаж " + match[2],
+              "Секция " + match[3],
+              "Полка " + match[4],
+            ];
+          } else if (/контейнер/i.test(text)) {
+            lines = [text];
+          } else if (/^K[12]$/i.test(cOnly)) {
+            lines = ["Контейнер " + text.replace(/K/i, "К")];
+          } else if (text) {
+            lines = [text];
+          }
+        }
+
+        if (boxLine) lines.push("Ящик: " + boxLine);
+        return lines;
+      }
+
+      function locLinesWithBox(locCode, warehouseLabel, boxText) {
+        var lines = locCode
+          ? decodeLocLines(locCode)
+          : warehouseLabelToLines(warehouseLabel);
+        var box = (boxText || "").trim();
+        if (!box) return lines;
+        var hasBox = lines.some(function (line) {
+          return /^Ящик:/i.test(line);
+        });
+        if (!hasBox) lines.push("Ящик: " + box);
+        return lines;
       }
 
       function renderLoc(el, lines) {
@@ -426,7 +452,7 @@
         wrap.classList.remove("hidden");
       }
 
-      function showFoundUI(part, article, locCode, photoParam) {
+      function showFoundUI(part, article, locCode, boxCode, photoParam) {
         var statusEl = document.getElementById("status");
         var locEl = document.getElementById("loc");
         var photoWrap = document.getElementById("photo-wrap");
@@ -438,10 +464,10 @@
 
         statusEl.classList.add("hidden");
 
-        var locLines = locCode
-          ? decodeLocLines(locCode)
-          : warehouseLabelToLines(part.warehouse);
-        renderLoc(locEl, locLines);
+        renderLoc(
+          locEl,
+          locLinesWithBox(locCode, part.warehouse, boxCode)
+        );
 
         var photo = photoParam || firstPhotoUrl(part.photo);
         showPhoto(photoWrap, photoEl, photo);
@@ -461,18 +487,18 @@
         setStatus(statusEl, "not-found", "Такой запчасти нет на складе");
       }
 
-      async function verifyAndRender(article, locCode, photoParam) {
+      async function verifyAndRender(article, locCode, boxCode, photoParam) {
         var statusEl = document.getElementById("status");
         var articleNorm = norm(article);
         var cached = readCache();
         var cachedHit = cached ? lookupPart(cached, articleNorm) : null;
 
         if (cachedHit) {
-          showFoundUI(cachedHit, article, locCode, photoParam);
+          showFoundUI(cachedHit, article, locCode, boxCode, photoParam);
           lookupPartWithFallback(articleNorm)
             .then(function (freshHit) {
               if (freshHit) {
-                showFoundUI(freshHit, article, locCode, photoParam);
+                showFoundUI(freshHit, article, locCode, boxCode, photoParam);
               } else {
                 showNotFound(statusEl);
               }
@@ -486,7 +512,7 @@
         try {
           var part = await lookupPartWithFallback(articleNorm);
           if (part) {
-            showFoundUI(part, article, locCode, photoParam);
+            showFoundUI(part, article, locCode, boxCode, photoParam);
           } else {
             showNotFound(statusEl);
           }
@@ -502,6 +528,7 @@
       var params = new URLSearchParams(window.location.search);
       var article = (params.get("a") || params.get("article") || "").trim();
       var locCode = (params.get("loc") || params.get("location") || "").trim();
+      var boxCode = (params.get("box") || "").trim();
       var photo = (params.get("p") || params.get("photo") || "").trim();
 
       var el = document.getElementById("article");
@@ -514,7 +541,7 @@
 
       el.textContent = article;
       el.classList.remove("empty");
-      verifyAndRender(article, locCode, photo);
+      verifyAndRender(article, locCode, boxCode, photo);
     })();
   </script>
 </body>
