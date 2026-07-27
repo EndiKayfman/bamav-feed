@@ -36,14 +36,16 @@
       padding: 28px 22px;
       text-align: center;
     }
-    h1 {
-      margin: 0 0 8px;
-      font-size: 1.15rem;
+    .label {
+      margin: 0 0 6px;
+      font-size: 0.85rem;
       font-weight: 600;
       color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
     }
     .article {
-      margin: 0 0 28px;
+      margin: 0 0 16px;
       font-size: 1.75rem;
       font-weight: 700;
       letter-spacing: 0.02em;
@@ -51,6 +53,34 @@
       color: var(--mist);
     }
     .article.empty { color: var(--muted); font-size: 1.1rem; font-weight: 500; }
+    .loc {
+      margin: 0 0 18px;
+      padding: 12px 14px;
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--emerald) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--emerald) 35%, transparent);
+      color: var(--emerald);
+      font-size: 0.95rem;
+      font-weight: 600;
+      line-height: 1.35;
+    }
+    .loc.hidden { display: none; }
+    .photo-wrap {
+      margin: 0 auto 18px;
+      width: 180px;
+      height: 180px;
+      border-radius: 12px;
+      overflow: hidden;
+      background: #fff;
+      border: 1px solid color-mix(in srgb, var(--mist) 15%, transparent);
+    }
+    .photo-wrap.hidden { display: none; }
+    .photo-wrap img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
     .actions {
       display: flex;
       flex-direction: column;
@@ -89,8 +119,12 @@
 </head>
 <body>
   <main class="card">
-    <h1>Артикул</h1>
+    <p class="label">Артикул</p>
     <p id="article" class="article empty">не указан</p>
+    <div id="loc" class="loc hidden"></div>
+    <div id="photo-wrap" class="photo-wrap hidden">
+      <img id="photo" alt="Фото запчасти" />
+    </div>
     <div class="actions">
       <a id="btn-bamper" class="btn primary" href="#" aria-disabled="true">Смотреть на bamper.by</a>
       <a id="btn-avby" class="btn secondary" href="#" aria-disabled="true">Смотреть на av.by</a>
@@ -99,9 +133,35 @@
   </main>
   <script>
     (function () {
+      function decodeLoc(code) {
+        if (!code) return "";
+        var parts = code.trim().split(".");
+        if (parts.length !== 5) return code;
+        var container = String(parts[1] || "").toUpperCase().replace("К", "K");
+        if (container === "K1") container = "К1";
+        else if (container === "K2") container = "К2";
+        else return code;
+        return (
+          "Склад 1 · " +
+          container +
+          " · Ст." +
+          parts[2] +
+          " · Сек." +
+          parts[3] +
+          " · Пол." +
+          parts[4]
+        );
+      }
+
       var params = new URLSearchParams(window.location.search);
       var article = (params.get("a") || params.get("article") || "").trim();
+      var locCode = (params.get("loc") || params.get("location") || "").trim();
+      var photo = (params.get("p") || params.get("photo") || "").trim();
+
       var el = document.getElementById("article");
+      var locEl = document.getElementById("loc");
+      var photoWrap = document.getElementById("photo-wrap");
+      var photoEl = document.getElementById("photo");
       var bamper = document.getElementById("btn-bamper");
       var avby = document.getElementById("btn-avby");
 
@@ -113,6 +173,19 @@
 
       el.textContent = article;
       el.classList.remove("empty");
+
+      if (locCode) {
+        locEl.textContent = decodeLoc(locCode);
+        locEl.classList.remove("hidden");
+      }
+
+      if (/^https?:\/\//i.test(photo)) {
+        photoEl.src = photo;
+        photoEl.onerror = function () {
+          photoWrap.classList.add("hidden");
+        };
+        photoWrap.classList.remove("hidden");
+      }
 
       var encoded = encodeURIComponent(article);
       bamper.href = "https://bamper.by/zchbu/artikul_" + article + "/";
