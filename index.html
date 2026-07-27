@@ -55,16 +55,24 @@
     .article.empty { color: var(--muted); font-size: 1.1rem; font-weight: 500; }
     .loc {
       margin: 0 0 18px;
-      padding: 12px 14px;
+      padding: 14px 16px;
       border-radius: 12px;
       background: color-mix(in srgb, var(--emerald) 12%, transparent);
       border: 1px solid color-mix(in srgb, var(--emerald) 35%, transparent);
-      color: var(--emerald);
-      font-size: 0.95rem;
-      font-weight: 600;
-      line-height: 1.35;
+      text-align: left;
     }
     .loc.hidden { display: none; }
+    .loc-line {
+      margin: 0;
+      padding: 3px 0;
+      color: var(--emerald);
+      font-size: 1rem;
+      font-weight: 600;
+      line-height: 1.45;
+    }
+    .loc-line + .loc-line {
+      margin-top: 2px;
+    }
     .photo-wrap {
       margin: 0 auto 18px;
       width: 180px;
@@ -133,24 +141,47 @@
   </main>
   <script>
     (function () {
-      function decodeLoc(code) {
-        if (!code) return "";
-        var parts = code.trim().split(".");
-        if (parts.length !== 5) return code;
-        var container = String(parts[1] || "").toUpperCase().replace("К", "K");
-        if (container === "K1") container = "К1";
-        else if (container === "K2") container = "К2";
-        else return code;
-        return (
-          "Склад 1 · " +
-          container +
-          " · Ст." +
-          parts[2] +
-          " · Сек." +
-          parts[3] +
-          " · Пол." +
-          parts[4]
-        );
+      function decodeLocLines(code) {
+        if (!code) return [];
+        var raw = code.trim();
+        var cOnly = raw.toUpperCase().replace(/К/g, "K");
+        if (cOnly === "K1") return ["Контейнер К1"];
+        if (cOnly === "K2") return ["Контейнер К2"];
+
+        var parts = raw.split(".");
+        // Склад: 1.2.3.4
+        if (parts.length === 4) {
+          return [
+            "Склад " + parts[0],
+            "Стеллаж " + parts[1],
+            "Секция " + parts[2],
+            "Полка " + parts[3],
+          ];
+        }
+        // Старый формат 1.K1.2.3.4
+        if (parts.length === 5) {
+          var mid = String(parts[1] || "").toUpperCase().replace(/К/g, "K");
+          if (mid === "K1") return ["Контейнер К1"];
+          if (mid === "K2") return ["Контейнер К2"];
+          return [
+            "Склад " + parts[0],
+            "Стеллаж " + parts[2],
+            "Секция " + parts[3],
+            "Полка " + parts[4],
+          ];
+        }
+        return [code];
+      }
+
+      function renderLoc(el, code) {
+        var lines = decodeLocLines(code);
+        if (!lines.length) return;
+        el.innerHTML = lines
+          .map(function (line) {
+            return '<p class="loc-line">' + line + "</p>";
+          })
+          .join("");
+        el.classList.remove("hidden");
       }
 
       var params = new URLSearchParams(window.location.search);
@@ -175,8 +206,7 @@
       el.classList.remove("empty");
 
       if (locCode) {
-        locEl.textContent = decodeLoc(locCode);
-        locEl.classList.remove("hidden");
+        renderLoc(locEl, locCode);
       }
 
       if (/^https?:\/\//i.test(photo)) {
