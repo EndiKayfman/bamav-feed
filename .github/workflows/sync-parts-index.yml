@@ -1,0 +1,37 @@
+name: Sync parts index
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - bamper.csv
+      - avby.csv
+      - scripts/build_parts_index.py
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build parts.json
+        run: python scripts/build_parts_index.py
+
+      - name: Commit parts.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add parts.json
+          if git diff --cached --quiet; then
+            echo "parts.json already up to date"
+            exit 0
+          fi
+          git commit -m "Auto-update parts.json from CSV feeds"
+          git push

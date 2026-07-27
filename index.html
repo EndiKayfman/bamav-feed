@@ -306,8 +306,10 @@
         return "";
       }
 
-      async function fetchPartsIndex() {
-        var resp = await fetch(PARTS_INDEX);
+      async function fetchPartsIndex(forceFresh) {
+        var url = PARTS_INDEX;
+        if (forceFresh) url += "?_=" + Date.now();
+        var resp = await fetch(url, forceFresh ? { cache: "no-store" } : undefined);
         if (!resp.ok) return null;
         var data = await resp.json();
         if (!data || !data.parts) return null;
@@ -386,11 +388,28 @@
 
       async function loadIndex() {
         try {
-          var index = await fetchPartsIndex();
+          var index = await fetchPartsIndex(true);
           if (index) return index;
         } catch (e) {}
 
         return fetchIndexFromCsv();
+      }
+
+      async function lookupPartWithFallback(articleNorm) {
+        try {
+          var index = await fetchPartsIndex(true);
+          if (index) {
+            var hit = lookupPart(index, articleNorm);
+            if (hit) return hit;
+          }
+        } catch (e) {}
+
+        try {
+          var csvIndex = await fetchIndexFromCsv();
+          return lookupPart(csvIndex, articleNorm);
+        } catch (e) {
+          return null;
+        }
       }
 
       function setStatus(el, kind, message) {
@@ -442,16 +461,6 @@
         setStatus(statusEl, "not-found", "Такой запчасти нет на складе");
       }
 
-      function applyLookup(index, article, locCode, photoParam, statusEl) {
-        var part = lookupPart(index, norm(article));
-        if (part) {
-          showFoundUI(part, article, locCode, photoParam);
-          return true;
-        }
-        showNotFound(statusEl);
-        return false;
-      }
-
       async function verifyAndRender(article, locCode, photoParam) {
         var statusEl = document.getElementById("status");
         var articleNorm = norm(article);
@@ -460,10 +469,8 @@
 
         if (cachedHit) {
           showFoundUI(cachedHit, article, locCode, photoParam);
-          fetchPartsIndex()
-            .then(function (fresh) {
-              if (!fresh) return;
-              var freshHit = lookupPart(fresh, articleNorm);
+          lookupPartWithFallback(articleNorm)
+            .then(function (freshHit) {
               if (freshHit) {
                 showFoundUI(freshHit, article, locCode, photoParam);
               } else {
@@ -477,8 +484,12 @@
         setStatus(statusEl, "loading", "Проверяем склад…");
 
         try {
-          var index = await loadIndex();
-          applyLookup(index, article, locCode, photoParam, statusEl);
+          var part = await lookupPartWithFallback(articleNorm);
+          if (part) {
+            showFoundUI(part, article, locCode, photoParam);
+          } else {
+            showNotFound(statusEl);
+          }
         } catch (err) {
           setStatus(
             statusEl,
